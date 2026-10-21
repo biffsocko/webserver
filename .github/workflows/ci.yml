@@ -1,0 +1,52 @@
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: Dockerfile
+
+  smoke-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t webserver:test .
+
+      - name: Start container
+        run: docker run -d --name web -p 8080:80 webserver:test
+
+      - name: Wait for nginx
+        run: |
+          for i in $(seq 1 15); do
+            curl -fsS http://localhost:8080/ >/dev/null && exit 0
+            sleep 1
+          done
+          echo "nginx never came up"; exit 1
+
+      - name: Page is ours
+        run: curl -fsS http://localhost:8080/ | grep -q "Served by nginx"
+
+      - name: Image is served
+        run: |
+          ctype=$(curl -fsS -o /dev/null -w '%{content_type}' http://localhost:8080/image.webp)
+          echo "content-type: $ctype"
+          [ "$ctype" = "image/webp" ]
+
+      - name: Container logs
+        if: failure()
+        run: docker logs web
